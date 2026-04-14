@@ -63,12 +63,12 @@ module Mailpace
     end
 
     def handle_response(result)
-      return result unless result.code != 200
+      return result if result.code == 200
 
       parsed_response = result.parsed_response
       error_message = join_error_messages(parsed_response)
 
-      raise DeliveryError, "MAILPACE Error: #{error_message}" unless error_message.empty?
+      raise DeliveryError, "MAILPACE Error: #{error_message.presence || "HTTP #{result.code}"}"
     end
 
     def format_attachments(attachments)
@@ -93,7 +93,8 @@ module Mailpace
     end
 
     def join_error_messages(response)
-      # Join 'error' and 'errors' keys from response into a single string
+      return '' unless response.is_a?(Hash)
+
       [response['error'], response['errors']].compact.join(', ')
     end
   end
