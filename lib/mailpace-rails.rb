@@ -44,20 +44,36 @@ module Mailpace
           attachments: format_attachments(mail.attachments),
           tags: mail.header['tags'].to_s
         }.delete_if { |_key, value| value.blank? }.to_json,
-        headers: {
-          'User-Agent' => "MailPace Rails Gem v#{Mailpace::Rails::VERSION}",
-          'Accept' => 'application/json',
-          'Content-Type' => 'application/json',
-          'Mailpace-Server-Token' => settings[:api_token]
-        }.tap do |h|
-          h['Idempotency-Key'] = mail.header['idempotency_key'].to_s if mail.header['idempotency_key']
-        end
+        headers: build_headers(mail)
       )
 
       handle_response(result)
     end
 
     private
+
+    def build_headers(mail)
+      headers = {
+        'User-Agent' => "MailPace Rails Gem v#{Mailpace::Rails::VERSION}",
+        'Accept' => 'application/json',
+        'Content-Type' => 'application/json',
+        'Mailpace-Server-Token' => settings[:api_token]
+      }
+
+      idempotency_key = extract_idempotency_key(mail)
+      headers['Idempotency-Key'] = idempotency_key if idempotency_key.present?
+
+      headers
+    end
+
+    def extract_idempotency_key(mail)
+      ['Idempotency-Key', 'idempotency_key'].each do |header_name|
+        idempotency_key = mail.header[header_name]&.to_s
+        return idempotency_key if idempotency_key.present?
+      end
+
+      nil
+    end
 
     def check_api_token(values)
       return if values[:api_token].present?

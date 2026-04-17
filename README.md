@@ -140,16 +140,17 @@ That's it! Emails should start flowing into your app just like magic.
 
 Mailpace supports [idempotency](https://docs.mailpace.com/guide/idempotency) for safely retrying requests without accidentally sending the same email twice. This is useful to guarantee that an email is not sent to the same recipient multiple times, e.g. through a network error, or a bug in your application logic.
 
-To do this, when writing your mailer, generate and add a unique `idempotency_key`:
+To do this, when writing your mailer, generate and add a unique idempotency key. You can pass `idempotency_key` to `mail`, or set the canonical `Idempotency-Key` header directly:
 
 ```ruby
 class TestMailer < ApplicationMailer
   default from: 'notifications@example.com'
   def idempotent_mail
     email = 'email@example.com'
+    headers['Idempotency-Key'] = Digest::SHA256.hexdigest("#{email}-#{Time.now.to_i / 3600}")
+
     mail(
-      to: email,
-      idempotency_key: Digest::SHA256.hexdigest("#{email}-#{Time.now.to_i / 3600}")
+      to: email
     )
   end
 end
