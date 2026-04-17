@@ -45,6 +45,39 @@ class Mailpace::Rails::Test < ActiveSupport::TestCase
     @test_email.deliver!
   end
 
+  test 'forwards Idempotency-Key header when set on the mail' do
+    IdempotencyMailer.hyphenated_key.deliver!
+
+    assert_requested(
+      :post, 'https://app.mailpace.com/api/v1/send',
+      times: 1
+    ) do |req|
+      req.headers['Idempotency-Key'] == 'hyphen-123'
+    end
+  end
+
+  test 'forwards Idempotency-Key header when set with snake_case name' do
+    IdempotencyMailer.snake_case_key.deliver!
+
+    assert_requested(
+      :post, 'https://app.mailpace.com/api/v1/send',
+      times: 1
+    ) do |req|
+      req.headers['Idempotency-Key'] == 'snake-123'
+    end
+  end
+
+  test 'does not send Idempotency-Key header when mail has none' do
+    IdempotencyMailer.no_key.deliver!
+
+    assert_requested(
+      :post, 'https://app.mailpace.com/api/v1/send',
+      times: 1
+    ) do |req|
+      !req.headers.key?('Idempotency-Key')
+    end
+  end
+
   test 'supports multiple attachments' do
     t = TestMailer.welcome_email
     t.attachments['logo.png'] = File.read("#{Dir.pwd}/test/logo.png")

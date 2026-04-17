@@ -108,6 +108,26 @@ class TestMailer < ApplicationMailer
 end
 ```
 
+## Idempotency
+
+To prevent duplicate sends when your background job retries a mailer that already hit the MailPace API, set an `Idempotency-Key` header on the mail. MailPace will deduplicate requests with the same key for 24 hours.
+
+```ruby
+class WelcomeMailer < ApplicationMailer
+  def welcome(user)
+    headers['Idempotency-Key'] = Digest::SHA256.hexdigest(
+      [self.class.name, action_name, user.id, Time.current.to_i / 3600].join('|')
+    )
+
+    mail(to: user.email, subject: 'Welcome')
+  end
+end
+```
+
+The key must be deterministic across retries of the same logical send. A common pattern is `SHA256(mailer_class + action + recipient + record_id + hour_bucket)`.
+
+See the MailPace docs for idempotency semantics: https://docs.mailpace.com/guide/idempotency/
+
 ## ActionMailbox (for receiving inbound emails)
 
 As of v0.3.0, this Gem supports handling Inbound Emails (see https://docs.mailpace.com/guide/inbound/ for more details) via ActionMailbox. To set this up:
