@@ -1,3 +1,9 @@
+# 0.3.3
+
+- Forward the `Idempotency-Key` HTTP header to the MailPace API when a mailer sets
+  `headers['Idempotency-Key']` or `headers['idempotency_key']`. No idempotency
+  header is sent when the mailer does not set one.
+
 # 0.3.2
 
 - Support for Rails 7.0.4.1, which uses Mail 2.8 under the hood
