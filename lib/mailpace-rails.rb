@@ -90,10 +90,17 @@ module Mailpace
     def handle_response(result)
       return result if result.code == 200
 
-      parsed_response = result.parsed_response
+      status_code = result.code.to_i
+      parsed_response = parsed_response_metadata(result.parsed_response)
       error_message = join_error_messages(parsed_response)
+      provider_error = error_message.presence
 
-      raise DeliveryError, "MAILPACE Error: #{error_message.presence || "HTTP #{result.code}"}"
+      raise DeliveryError.new(
+        "MAILPACE Error: #{provider_error || "HTTP #{status_code}"}",
+        status_code: status_code,
+        provider_error: provider_error,
+        parsed_response: parsed_response
+      )
     end
 
     def format_attachments(attachments)
@@ -122,10 +129,45 @@ module Mailpace
 
       [response['error'], response['errors']].compact.join(', ')
     end
+
+    def parsed_response_metadata(response)
+      response if response.is_a?(Hash)
+    end
   end
 
   class Error < StandardError; end
-  class DeliveryError < StandardError; end
+  class DeliveryError < StandardError
+    attr_reader :status_code, :provider_error, :parsed_response
+
+    def initialize(message = nil, status_code: nil, provider_error: nil, parsed_response: nil)
+      super(message)
+      @status_code = status_code
+      @provider_error = provider_error
+      @parsed_response = parsed_response
+    end
+
+    def concurrency_rejection?
+      status_code == 409 || error_text.include?('Concurrent requests detected')
+    end
+
+    def server_error?
+      status_code.to_i >= 500 && status_code.to_i < 600
+    end
+
+    def client_error?
+      status_code.to_i >= 400 && status_code.to_i < 500
+    end
+
+    def blocked_address?
+      error_text.include?('contains a blocked address')
+    end
+
+    private
+
+    def error_text
+      provider_error.presence || message.to_s
+    end
+  end
 
   def self.root
     Pathname.new(File.expand_path(File.join(__dir__, '..')))
