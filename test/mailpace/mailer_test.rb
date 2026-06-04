@@ -50,6 +50,39 @@ class Mailpace::Rails::Test < ActiveSupport::TestCase
     )
   end
 
+  test 'forwards Idempotency-Key header when set on the mail' do
+    IdempotencyMailer.hyphenated_key.deliver!
+
+    assert_requested(
+      :post, 'https://app.mailpace.com/api/v1/send',
+      times: 1
+    ) do |req|
+      req.headers['Idempotency-Key'] == 'hyphen-123'
+    end
+  end
+
+  test 'forwards Idempotency-Key header when set with snake_case name' do
+    IdempotencyMailer.snake_case_key.deliver!
+
+    assert_requested(
+      :post, 'https://app.mailpace.com/api/v1/send',
+      times: 1
+    ) do |req|
+      req.headers['Idempotency-Key'] == 'snake-123'
+    end
+  end
+
+  test 'does not send Idempotency-Key header when mail has none' do
+    IdempotencyMailer.no_key.deliver!
+
+    assert_requested(
+      :post, 'https://app.mailpace.com/api/v1/send',
+      times: 1
+    ) do |req|
+      !req.headers.key?('Idempotency-Key')
+    end
+  end
+
   test 'supports multiple attachments' do
     t = TestMailer.welcome_email
     t.attachments['logo.png'] = File.read("#{Dir.pwd}/test/logo.png")
@@ -197,9 +230,92 @@ class Mailpace::Rails::Test < ActiveSupport::TestCase
 
     t = TestMailer.welcome_email
 
-    assert_raise(Mailpace::DeliveryError, 'MAILPACE Error: contains a blocked address') do
+    error = assert_raise(Mailpace::DeliveryError) do
       t.deliver!
     end
+
+    assert_equal 'MAILPACE Error: contains a blocked address', error.message
+    assert_equal 400, error.status_code
+    assert_equal 'contains a blocked address', error.provider_error
+    assert_equal({ 'error' => 'contains a blocked address' }, error.parsed_response)
+    assert error.client_error?
+    assert error.blocked_address?
+    refute error.server_error?
+  end
+
+  test 'DeliveryError keeps normal exception construction compatibility' do
+    assert_instance_of Mailpace::DeliveryError, Mailpace::DeliveryError.new
+
+    assert_raise(Mailpace::DeliveryError) do
+      raise Mailpace::DeliveryError
+    end
+  end
+
+  test 'DeliveryError predicates fall back to existing message text' do
+    error = Mailpace::DeliveryError.new('MAILPACE Error: contains a blocked address')
+
+    assert error.blocked_address?
+  end
+
+  test 'DeliveryError exposes response metadata for provider concurrency errors' do
+    stub_request(:post, 'https://app.mailpace.com/api/v1/send')
+      .to_return(
+        body: { error: 'Concurrent requests detected' }.to_json,
+        headers: { content_type: 'application/json' },
+        status: 409
+      )
+
+    error = assert_raise(Mailpace::DeliveryError) do
+      TestMailer.welcome_email.deliver!
+    end
+
+    assert_equal 'MAILPACE Error: Concurrent requests detected', error.message
+    assert_equal 409, error.status_code
+    assert_equal 'Concurrent requests detected', error.provider_error
+    assert_equal({ 'error' => 'Concurrent requests detected' }, error.parsed_response)
+    assert error.concurrency_rejection?
+    assert error.client_error?
+    refute error.server_error?
+  end
+
+  test 'DeliveryError provider_error can come from errors response key' do
+    stub_request(:post, 'https://app.mailpace.com/api/v1/send')
+      .to_return(
+        body: { errors: ['first failure', 'second failure'] }.to_json,
+        headers: { content_type: 'application/json' },
+        status: 403
+      )
+
+    error = assert_raise(Mailpace::DeliveryError) do
+      TestMailer.welcome_email.deliver!
+    end
+
+    assert_equal 'MAILPACE Error: first failure, second failure', error.message
+    assert_equal 403, error.status_code
+    assert_equal 'first failure, second failure', error.provider_error
+    assert_equal({ 'errors' => ['first failure', 'second failure'] }, error.parsed_response)
+    assert error.client_error?
+  end
+
+  test 'DeliveryError falls back to HTTP status for non-json responses' do
+    stub_request(:post, 'https://app.mailpace.com/api/v1/send')
+      .to_return(
+        body: 'Gateway timeout with raw provider details',
+        headers: { content_type: 'text/plain' },
+        status: 504
+      )
+
+    error = assert_raise(Mailpace::DeliveryError) do
+      TestMailer.welcome_email.deliver!
+    end
+
+    assert_equal 'MAILPACE Error: HTTP 504', error.message
+    assert_equal 504, error.status_code
+    assert_nil error.provider_error
+    assert_nil error.parsed_response
+    assert error.server_error?
+    refute error.client_error?
+    refute_respond_to error, :raw_response
   end
 
   test 'supports in-reply-to' do
